@@ -22,33 +22,33 @@ async def downloads_ws(ws: WebSocket):
 
 @router.post("/download")
 async def add_download(url: str):
-    d = manager.create_download(url)
+    d = await manager.create_download(url)
     d.total=await get_total_size(url)
     await manager.start(d.id)   # starts async task
     return d
 
 
 @router.post("/pause/{download_id}")
-def pause(download_id: str):
-    manager.pause(download_id)
+async def pause(download_id: str):
+    await manager.pause(download_id)
     return {"status": "paused"}
 
 
 @router.post("/resume/{download_id}")
-def resume(download_id: str):
-    manager.resume(download_id)
+async def resume(download_id: str):
+    await manager.resume(download_id)
     return {"status": "resumed"}
 
 
 @router.post("/pause-all")
-def pause_all():
-    manager.pause_all()
+async def pause_all():
+    await manager.pause_all()
     return {"status": "paused all"}
 
 
 @router.post("/resume-all")
-def resume_all():
-    manager.resume_all()
+async def resume_all():
+    await manager.resume_all()
     return {"status": "resumed all"}
 
 

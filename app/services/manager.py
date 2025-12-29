@@ -1,120 +1,4 @@
-# import asyncio
-# import os
-# import uuid
-# from urllib.parse import urlparse
 
-# from tqdm import tqdm
-
-# from app.core.downloder import download_file
-# from app.models.download import Download
-# from app.utils.download_utils import get_download_path
-
-
-# class DownloadManager:
-#     def __init__(self):
-#         self.downloads = {}
-#         self.tasks = {}
-#         self.pause_events = {}
-
-#     def create_download(self, url: str) -> Download:
-#         download_id = str(uuid.uuid4())
-
-#         parsed = urlparse(url)
-#         filename = os.path.basename(parsed.path) or download_id
-
-#         file_path = get_download_path(filename)
-
-#         d = Download(
-#             id=download_id,
-#             url=url,
-#             file_path=str(file_path),
-#             downloaded=0,
-#             total=None,
-#             status="queued"
-#         )
-
-#         self.downloads[download_id] = d
-#         self.pause_events[download_id] = asyncio.Event()
-#         self.pause_events[download_id].set()
-
-#         return d
-
-#     async def start(self, download_id: str):
-#         d = self.downloads[download_id]
-#         pause_event = self.pause_events[download_id]
-
-#         os.makedirs(os.path.dirname(d.file_path), exist_ok=True)
-
-#         start_byte = os.path.getsize(d.file_path) if os.path.exists(d.file_path) else 0
-#         d.downloaded = start_byte
-#         d.status = "downloading"
-
-#         bar = tqdm(
-#             total=0,  # unknown initially
-#             initial=start_byte,
-#             unit="B",
-#             unit_scale=True,
-#             unit_divisor=1024,
-#             desc=d.id[:8],
-#             leave=True
-#         )
-
-#         def progress(downloaded_so_far, total):
-#             d.downloaded = downloaded_so_far
-#             if total is not None:
-#                 d.total = total
-#                 if bar.total != total:
-#                     bar.total = total
-
-#             bar.n = downloaded_so_far
-#             bar.refresh()
-
-#         async def runner():
-#             try:
-#                 await download_file(
-#                     d.url,
-#                     d.file_path,
-#                     start_byte,
-#                     progress,       # ✅ pass the function itself
-#                     pause_event
-#                 )
-
-#                 # finalize size if it was unknown
-#                 if d.total is None:
-#                     d.total = d.downloaded
-
-#                 d.status = "completed"
-
-#             except Exception as e:
-#                 print("Download failed:", e)
-#                 d.status = "failed"
-
-#             finally:
-#                 bar.close()
-
-#         self.tasks[download_id] = asyncio.create_task(runner())
-
-
-#     def pause(self, download_id: str):
-#         if download_id in self.downloads:
-#             self.downloads[download_id].status = "paused"
-#             self.pause_events[download_id].clear()
-
-#     def resume(self, download_id: str):
-#         if download_id in self.downloads:
-#             self.downloads[download_id].status = "downloading"
-#             self.pause_events[download_id].set()
-
-#     def pause_all(self):
-#         for download_id in self.downloads:
-#             self.pause(download_id)
-
-#     def resume_all(self):
-#         for download_id in self.downloads:
-#             self.resume(download_id)
-
-#     def get_all(self):
-#         return list(self.downloads.values())
 import asyncio
 import os
 import uuid
@@ -133,7 +17,7 @@ class DownloadManager:
         self.tasks = {}
         self.pause_events = {}
 
-    def create_download(self, url: str) -> Download:
+    async def create_download(self, url: str) -> Download:
         download_id = str(uuid.uuid4())
 
         parsed = urlparse(url)
@@ -153,7 +37,7 @@ class DownloadManager:
         self.pause_events[download_id] = asyncio.Event()
         self.pause_events[download_id].set()
 
-        self._emit(d)
+        await self._emit(d)
 
         return d
 
@@ -167,9 +51,9 @@ class DownloadManager:
         start_byte = os.path.getsize(d.file_path) if os.path.exists(d.file_path) else 0
         d.downloaded = start_byte
         d.status = "downloading"
-        self._emit(d)
+        await self._emit(d)
 
-        # ✅ Initialize tqdm with known total (if any)
+     
         bar = tqdm(
             total=d.total,
             initial=start_byte,
@@ -183,7 +67,6 @@ class DownloadManager:
         def progress(downloaded_so_far: int, total: int | None):
             d.downloaded = downloaded_so_far
 
-            # 🔹 Downloader is the source of truth
             if total is not None and d.total != total:
                 d.total = total
                 bar.total = total
@@ -191,7 +74,8 @@ class DownloadManager:
             bar.n = downloaded_so_far
             bar.refresh()
 
-            self._emit(d)
+            asyncio.create_task(self._emit(d))
+
 
         async def runner():
             try:
@@ -203,7 +87,6 @@ class DownloadManager:
                     pause_event
                 )
 
-                # 🔹 Final consistency
                 if d.total is None:
                     d.total = d.downloaded
                 else:
@@ -223,9 +106,8 @@ class DownloadManager:
         self.tasks[download_id] = asyncio.create_task(runner())
 
 
-    def _emit(self, d):
-        asyncio.create_task(
-            ws_manager.broadcast({
+    async def _emit(self, d):
+            await ws_manager.broadcast({
                 "id": d.id,
                 "url": d.url,
                 "downloaded": d.downloaded,
@@ -233,32 +115,31 @@ class DownloadManager:
                 "status": d.status,
                 "file_path": d.file_path,
             })
-        )
     
 
-    def pause(self, download_id: str):
+    async def pause(self, download_id: str):
         if download_id in self.downloads:
             d = self.downloads[download_id]
             d.status = "paused"
             self.pause_events[download_id].clear()
-            self._emit(d)
+            await self._emit(d)
 
 
-    def resume(self, download_id: str):
+    async def resume(self, download_id: str):
         if download_id in self.downloads:
             d = self.downloads[download_id]
             d.status = "downloading"
             self.pause_events[download_id].set()
-            self._emit(d)
+            await self._emit(d)
 
 
-    def pause_all(self):
+    async def pause_all(self):
         for download_id in self.downloads:
-            self.pause(download_id)
+            await self.pause(download_id)
 
-    def resume_all(self):
+    async def resume_all(self):
         for download_id in self.downloads:
-            self.resume(download_id)
+            await self.resume(download_id)
 
     def get_all(self):
         return list(self.downloads.values())
