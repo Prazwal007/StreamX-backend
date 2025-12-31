@@ -1,4 +1,6 @@
 from fastapi import APIRouter,Query
+from app.models.download import Download
+from pydantic import BaseModel
 from app.services.manager import DownloadManager
 from fastapi import WebSocket, WebSocketDisconnect
 from app.ws import ws_manager
@@ -6,8 +8,6 @@ from app.utils.download_utils import get_total_size
 
 router = APIRouter()
 manager = DownloadManager()
-
-
 
 @router.websocket("/ws/downloads")
 async def downloads_ws(ws: WebSocket):
@@ -21,7 +21,7 @@ async def downloads_ws(ws: WebSocket):
 
 
 @router.post("/download")
-async def add_download(url: str):
+async def add_download(url:str):
     d = await manager.create_download(url)
     d.total=await get_total_size(url)
     await manager.start(d.id)   # starts async task

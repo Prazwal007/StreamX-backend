@@ -1,5 +1,4 @@
 
-
 import aiohttp
 import asyncio
 import os
@@ -8,7 +7,7 @@ from app.utils.download_utils import get_total_size
 from app.ws import ws_manager
 
 CHUNK_SIZE = 1024 * 8       
-SPEED_LIMIT_KBPS = 20        # artificial throttle
+SPEED_LIMIT_KBPS = 2        # artificial throttle
 
 
 async def _download(
