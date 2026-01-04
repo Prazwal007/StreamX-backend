@@ -1,21 +1,218 @@
 
+# import asyncio
+# import os
+# import uuid
+# from urllib.parse import urlparse
+
+# from tqdm import tqdm
+# from app.ws import ws_manager
+# from app.core.downloder import download_file
+# from app.models.download import Download
+# from app.utils.download_utils import get_download_path,DOWNLOADS_PATH
+
+
+# class DownloadManager:
+#     def __init__(self):
+#         self.downloads = {}
+#         self.tasks = {}
+#         self.pause_events = {}
+
+#     async def create_download(self, url: str) -> Download:
+#         download_id = str(uuid.uuid4())
+
+#         parsed = urlparse(url)
+#         filename = os.path.basename(parsed.path) or download_id
+#         file_path = get_download_path(filename)
+
+#         d = Download(
+#             id=download_id,
+#             filename=filename,
+#             url=url,
+#             file_path=str(file_path),
+#             downloaded=0,
+#             total=None,
+#             status="queued"
+#         )
+
+#         self.downloads[download_id] = d
+#         self.pause_events[download_id] = asyncio.Event()
+#         self.pause_events[download_id].set()
+
+#         await self._emit(d)
+
+#         return d
+
+
+#     async def start(self, download_id: str):
+#         d = self.downloads[download_id]
+#         pause_event = self.pause_events[download_id]
+
+#         os.makedirs(os.path.dirname(d.file_path), exist_ok=True)
+
+#         start_byte = os.path.getsize(d.file_path) if os.path.exists(d.file_path) else 0
+#         d.downloaded = start_byte
+#         d.status = "downloading"
+#         await self._emit(d)
+
+     
+#         bar = tqdm(
+#             total=d.total,
+#             initial=start_byte,
+#             unit="B",
+#             unit_scale=True,
+#             unit_divisor=1024,
+#             desc=d.id[:8],
+#             leave=True
+#         )
+
+#         def progress(downloaded_so_far: int, total: int | None):
+#             d.downloaded = downloaded_so_far
+
+#             if total is not None and d.total != total:
+#                 d.total = total
+#                 bar.total = total
+
+#             bar.n = downloaded_so_far
+#             bar.refresh()
+
+#             asyncio.create_task(self._emit(d))
+
+
+#         async def runner():
+#             try:
+#                 await download_file(
+#                     d.url,
+#                     d.file_path,
+#                     start_byte,
+#                     progress,
+#                     pause_event
+#                 )
+
+#                 if d.total is None:
+#                     d.total = d.downloaded
+#                 else:
+#                     d.downloaded = d.total
+
+#                 d.status = "completed"
+#                 self._emit(d)
+
+#             except Exception as e:
+#                 print("Download failed:", e)
+#                 d.status = "failed"
+#                 self._emit(d)
+
+#             finally:
+#                 bar.close()
+
+#         self.tasks[download_id] = asyncio.create_task(runner())
+
+
+#     async def _emit(self, d):
+#             await ws_manager.broadcast({
+#                 "id": d.id,
+#                 "filename":d.filename,
+#                 "url": d.url,
+#                 "downloaded": d.downloaded,
+#                 "total": d.total,
+#                 "status": d.status,
+#                 "file_path": d.file_path,
+#             })
+    
+
+#     async def pause(self, download_id: str):
+#         if download_id in self.downloads:
+#             d = self.downloads[download_id]
+#             d.status = "paused"
+#             self.pause_events[download_id].clear()
+#             await self._emit(d)
+
+
+#     async def resume(self, download_id: str):
+#         if download_id in self.downloads:
+#             d = self.downloads[download_id]
+#             d.status = "downloading"
+#             self.pause_events[download_id].set()
+#             await self._emit(d)
+
+
+#     async def pause_all(self):
+#         for download_id in self.downloads:
+#             await self.pause(download_id)
+
+#     async def resume_all(self):
+#         for download_id in self.downloads:
+#             await self.resume(download_id)
+
+#     def get_all(self):
+#         return list(self.downloads.values())
+
+    
+#     def list_files(self,category: str | None = None):
+#         """
+#         List all files in Downloads/StreamX, optionally filtered by category.
+#         """
+#         result = []
+
+#         if category:
+#             folder = DOWNLOADS_PATH / category
+#             if folder.exists():
+#                 for file_path in folder.iterdir():
+#                     if file_path.is_file():
+#                         result.append({
+#                             "name": file_path.name,
+#                             "path": str(file_path),
+#                             "category": category,
+#                             "size": file_path.stat().st_size
+#                         })
+#         else:
+#             # List all categories
+#             for folder in DOWNLOADS_PATH.iterdir():
+#                 if folder.is_dir():
+#                     for file_path in folder.iterdir():
+#                         if file_path.is_file():
+#                             result.append({
+#                                 "name": file_path.name,
+#                                 "path": str(file_path),
+#                                 "category": folder.name,
+#                                 "size": file_path.stat().st_size
+#                             })
+#         return result
+    
+#     async def cancel_and_remove(self, download_id: str):
+#         """Stop the download if running and remove it from manager."""
+#         task = self.downloads.get(download_id)
+#         if task:
+            
+#             await task.pause()
+
+#         # 2. Remove from internal tracking
+#         self.downloads.pop(download_id, None)
+
+
 import asyncio
 import os
 import uuid
+import time
 from urllib.parse import urlparse
 
 from tqdm import tqdm
+
 from app.ws import ws_manager
 from app.core.downloder import download_file
 from app.models.download import Download
-from app.utils.download_utils import get_download_path,DOWNLOADS_PATH
+from app.utils.download_utils import get_download_path, DOWNLOADS_PATH
 
 
 class DownloadManager:
     def __init__(self):
-        self.downloads = {}
-        self.tasks = {}
-        self.pause_events = {}
+        self.downloads: dict[str, Download] = {}
+        self.tasks: dict[str, asyncio.Task] = {}
+        self.pause_events: dict[str, asyncio.Event] = {}
+
+        # ETA helpers
+        self._last_bytes: dict[str, int] = {}
+        self._last_time: dict[str, float] = {}
+        self._speed: dict[str, float] = {}  # bytes/sec 
 
     async def create_download(self, url: str) -> Download:
         download_id = str(uuid.uuid4())
@@ -26,21 +223,25 @@ class DownloadManager:
 
         d = Download(
             id=download_id,
+            filename=filename,
             url=url,
             file_path=str(file_path),
             downloaded=0,
             total=None,
-            status="queued"
+            status="queued",
+            eta_seconds=None,
         )
 
         self.downloads[download_id] = d
         self.pause_events[download_id] = asyncio.Event()
         self.pause_events[download_id].set()
 
+        self._last_bytes[download_id] = 0
+        self._last_time[download_id] = time.monotonic()
+        self._speed[download_id] = 0.0
+
         await self._emit(d)
-
         return d
-
 
     async def start(self, download_id: str):
         d = self.downloads[download_id]
@@ -51,9 +252,12 @@ class DownloadManager:
         start_byte = os.path.getsize(d.file_path) if os.path.exists(d.file_path) else 0
         d.downloaded = start_byte
         d.status = "downloading"
+
+        self._last_bytes[download_id] = start_byte
+        self._last_time[download_id] = time.monotonic()
+
         await self._emit(d)
 
-     
         bar = tqdm(
             total=d.total,
             initial=start_byte,
@@ -61,21 +265,46 @@ class DownloadManager:
             unit_scale=True,
             unit_divisor=1024,
             desc=d.id[:8],
-            leave=True
+            leave=True,
         )
 
         def progress(downloaded_so_far: int, total: int | None):
+            now = time.monotonic()
+            last_t = self._last_time[d.id]
+            last_b = self._last_bytes[d.id]
+
+            dt = now - last_t
+            db = downloaded_so_far - last_b
+
+            if dt > 0 and db > 0:
+                instant_speed = db / dt
+
+                alpha = 0.3
+                prev = self._speed[d.id]
+                self._speed[d.id] = (
+                    instant_speed if prev == 0 else prev * (1 - alpha) + instant_speed * alpha
+                )
+
+            self._last_time[d.id] = now
+            self._last_bytes[d.id] = downloaded_so_far
+
             d.downloaded = downloaded_so_far
 
             if total is not None and d.total != total:
                 d.total = total
                 bar.total = total
 
+            # ETA
+            if d.total and self._speed[d.id] > 0:
+                remaining = d.total - d.downloaded
+                d.eta_seconds = int(remaining / self._speed[d.id])
+            else:
+                d.eta_seconds = None
+
             bar.n = downloaded_so_far
             bar.refresh()
 
             asyncio.create_task(self._emit(d))
-
 
         async def runner():
             try:
@@ -84,7 +313,7 @@ class DownloadManager:
                     d.file_path,
                     start_byte,
                     progress,
-                    pause_event
+                    pause_event,
                 )
 
                 if d.total is None:
@@ -93,12 +322,14 @@ class DownloadManager:
                     d.downloaded = d.total
 
                 d.status = "completed"
-                self._emit(d)
+                d.eta_seconds = 0
+                await self._emit(d)
 
             except Exception as e:
                 print("Download failed:", e)
                 d.status = "failed"
-                self._emit(d)
+                d.eta_seconds = None
+                await self._emit(d)
 
             finally:
                 bar.close()
@@ -106,16 +337,19 @@ class DownloadManager:
         self.tasks[download_id] = asyncio.create_task(runner())
 
 
-    async def _emit(self, d):
-            await ws_manager.broadcast({
+    async def _emit(self, d: Download):
+        await ws_manager.broadcast(
+            {
                 "id": d.id,
+                "filename": d.filename,
                 "url": d.url,
                 "downloaded": d.downloaded,
                 "total": d.total,
                 "status": d.status,
                 "file_path": d.file_path,
-            })
-    
+                "eta_seconds": d.eta_seconds,
+            }
+        )
 
     async def pause(self, download_id: str):
         if download_id in self.downloads:
@@ -124,7 +358,6 @@ class DownloadManager:
             self.pause_events[download_id].clear()
             await self._emit(d)
 
-
     async def resume(self, download_id: str):
         if download_id in self.downloads:
             d = self.downloads[download_id]
@@ -132,23 +365,50 @@ class DownloadManager:
             self.pause_events[download_id].set()
             await self._emit(d)
 
-
     async def pause_all(self):
-        for download_id in self.downloads:
+        for download_id in list(self.downloads):
             await self.pause(download_id)
 
     async def resume_all(self):
-        for download_id in self.downloads:
+        for download_id in list(self.downloads):
             await self.resume(download_id)
+
 
     def get_all(self):
         return list(self.downloads.values())
 
-    
-    def list_files(self,category: str | None = None):
-        """
-        List all files in Downloads/StreamX, optionally filtered by category.
-        """
+    # def list_files(self, category: str | None = None):
+    #     result = []
+
+    #     if category:
+    #         folder = DOWNLOADS_PATH / category
+    #         if folder.exists():
+    #             for file_path in folder.iterdir():
+    #                 if file_path.is_file():
+    #                     result.append(
+    #                         {
+    #                             "name": file_path.name,
+    #                             "path": str(file_path),
+    #                             "category": category,
+    #                             "size": file_path.stat().st_size,
+    #                         }
+    #                     )
+    #     else:
+    #         for folder in DOWNLOADS_PATH.iterdir():
+    #             if folder.is_dir():
+    #                 for file_path in folder.iterdir():
+    #                     if file_path.is_file():
+    #                         result.append(
+    #                             {
+    #                                 "name": file_path.name,
+    #                                 "path": str(file_path),
+    #                                 "category": folder.name,
+    #                                 "size": file_path.stat().st_size,
+    #                             }
+    #                         )
+
+    #     return result
+    def list_files(self, category: str | None = None):
         result = []
 
         if category:
@@ -160,10 +420,10 @@ class DownloadManager:
                             "name": file_path.name,
                             "path": str(file_path),
                             "category": category,
-                            "size": file_path.stat().st_size
+                            "size": file_path.stat().st_size,
+                            "_mtime": file_path.stat().st_mtime,  # internal only
                         })
         else:
-            # List all categories
             for folder in DOWNLOADS_PATH.iterdir():
                 if folder.is_dir():
                     for file_path in folder.iterdir():
@@ -172,16 +432,27 @@ class DownloadManager:
                                 "name": file_path.name,
                                 "path": str(file_path),
                                 "category": folder.name,
-                                "size": file_path.stat().st_size
+                                "size": file_path.stat().st_size,
+                                "_mtime": file_path.stat().st_mtime,  # internal only
                             })
-        return result
-    
-    async def cancel_and_remove(self, download_id: str):
-        """Stop the download if running and remove it from manager."""
-        task = self.downloads.get(download_id)
-        if task:
-            
-            await task.pause()
 
-        # 2. Remove from internal tracking
+        # Sort by modified time (latest first)
+        result.sort(key=lambda x: x["_mtime"], reverse=True)
+
+        # Remove internal field before returning
+        for item in result:
+            item.pop("_mtime", None)
+
+        return result
+
+
+    async def cancel_and_remove(self, download_id: str):
+        task = self.tasks.get(download_id)
+        if task:
+            task.cancel()
+
+        self.pause_events.pop(download_id, None)
+        self._last_bytes.pop(download_id, None)
+        self._last_time.pop(download_id, None)
+        self._speed.pop(download_id, None)
         self.downloads.pop(download_id, None)
