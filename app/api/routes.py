@@ -1,6 +1,7 @@
 from fastapi import APIRouter,Query
 from app.models.download import Download
 from pydantic import BaseModel
+import time
 from app.services.manager import DownloadManager
 from fastapi import WebSocket, WebSocketDisconnect
 from app.ws import ws_manager
@@ -64,3 +65,31 @@ def get_files(category: str | None = Query(None, description="Filter by category
     Get all downloaded files. Optionally filter by category like 'Images', 'Videos', etc.
     """
     return manager.list_files(category)
+
+@router.post("/downloads/{download_id}/pin")
+async def pin_download(download_id: str):
+    d = manager.downloads.get(download_id)
+    if not d:
+        return {"error": "Download not found"}
+
+    d.is_pinned = True
+    d.pinned_at = time.monotonic()
+
+    await manager._enforce_priority()
+    await manager._emit(d)
+
+    return {"status": "pinned"}
+
+@router.post("/downloads/{download_id}/unpin")
+async def unpin_download(download_id: str):
+    d = manager.downloads.get(download_id)
+    if not d:
+        return {"error": "Download not found"}
+
+    d.is_pinned = False
+    d.pinned_at = None
+
+    await manager._enforce_priority()
+    await manager._emit(d)
+
+    return {"status": "unpinned"}

@@ -225,15 +225,15 @@ from app.ws import ws_manager
 
 
 #  Download Parameters 
-# INITIAL_CHUNK_SIZE = 1024 * 8       # 8 KB
-# MIN_CHUNK_SIZE = 1024 * 4           # 4 KB
-# MAX_CHUNK_SIZE = 1024 * 512         # 512 KB
+INITIAL_CHUNK_SIZE = 1024 * 8       # 8 KB
+MIN_CHUNK_SIZE = 1024 * 4           # 4 KB
+MAX_CHUNK_SIZE = 1024 * 512         # 512 KB
 
-INITIAL_CHUNK_SIZE = 128 * 1024   # 128 KB
-MIN_CHUNK_SIZE = 32 * 1024        # 32 KB
-MAX_CHUNK_SIZE = 1024 * 1024      # 1 MB
+# INITIAL_CHUNK_SIZE = 128 * 1024   # 128 KB
+# MIN_CHUNK_SIZE = 32 * 1024        # 32 KB
+# MAX_CHUNK_SIZE = 1024 * 1024      # 1 MB
 
-# SPEED_LIMIT_KBPS = 20                # artificial throttle
+SPEED_LIMIT_KBPS = 1                # artificial throttle
 
 
 async def _download(
@@ -365,6 +365,9 @@ async def _download(
 
                 # ---------- Progress callback ----------
                 progress_cb(downloaded_so_far, total, chunk_size, avg_speed)
+                # Throttling 
+                throttle_delay = len(chunk) / (SPEED_LIMIT_KBPS * 1024)
+                await asyncio.sleep(throttle_delay)
 
 
 
