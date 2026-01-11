@@ -5,7 +5,7 @@ from .storage import save_model, load_model
 class MLController:
     def __init__(self):
         self.bandit = load_model() or ContextualBandit(
-            n_actions=5,
+            n_actions=9,
             n_features=6
         )
         self.last_context = None

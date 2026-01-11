@@ -21,3 +21,4 @@ class ContextualBandit:
         self.counts[action] += 1
         lr = 1.0 / self.counts[action]
         self.weights[action] += lr * reward * context
+        self.epsilon = max(0.01, self.epsilon * 0.999) #for fater learning

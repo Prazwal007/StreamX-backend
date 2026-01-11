@@ -5,6 +5,7 @@ from app.services.manager import DownloadManager
 from fastapi import WebSocket, WebSocketDisconnect
 from app.ws import ws_manager
 from app.utils.download_utils import get_total_size
+from app.utils.url_validator import validate_download_url
 
 router = APIRouter()
 manager = DownloadManager()
@@ -22,6 +23,7 @@ async def downloads_ws(ws: WebSocket):
 
 @router.post("/download")
 async def add_download(url:str):
+    url=validate_download_url(url) #line added
     d = await manager.create_download(url)
     d.total=await get_total_size(url)
     await manager.start(d.id)   # starts async task
